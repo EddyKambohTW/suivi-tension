@@ -138,6 +138,11 @@ svg.ch .l{fill:none;stroke-width:3;stroke-linejoin:round;stroke-linecap:round}
 .hrow{background:var(--card);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .hrow .v{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
 .hrow .meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.hrow .sub{width:100%;display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--line);padding-top:4px}
+.srow{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;font-size:16px}
+.srow .del{margin-left:auto}
+.timer{font-size:52px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;line-height:1.1}
+.timer.done{font-size:30px}
 .del{min-height:44px;min-width:44px;border:none;background:none;color:var(--muted);border-radius:10px;display:flex;align-items:center;justify-content:center}
 .confirm{width:100%;display:flex;gap:8px;flex-wrap:wrap}
 
@@ -176,6 +181,7 @@ const COLORS=['#0F5F63','#8A4B00','#3B4FA0','#7A3E7A','#2F6B2F'];
 const DAY=864e5;
 let S, storageOK=true;
 let view='home', range=14, repRange=30, showPulse=false, pending=null, entryWarned=false, addOpen=false, critShow=false, entryDraft=null;
+let sess=null, tm=null; // séance en cours : {pid, count, restUntil}
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -189,12 +195,12 @@ function seed(){
     const t=new Date(now); t.setDate(now.getDate()-d); t.setHours(h,(d*7)%40+5,0,0);
     if(t>now) continue;
     const tr=(13-d)*0.5;
-    rs.push({id:uid(),pid,ts:t.getTime(),
-      sys:rnd(139-tr+(h===20?-3:0)+((d*37+h)%7)-3),
-      dia:rnd(88-tr*0.4+(h===20?-2:0)+((d*17+h)%5)-2),
-      pulse:68+((d*13+h)%9)-4,arm:'',pos:'',note:''});
+    const s1=rnd(139-tr+(h===20?-3:0)+((d*37+h)%7)-3), d1=rnd(88-tr*0.4+(h===20?-2:0)+((d*17+h)%5)-2), p1=68+((d*13+h)%9)-4;
+    rs.push({id:uid(),pid,ts:t.getTime(),sys:s1,dia:d1,pulse:p1,arm:'',pos:'',note:''});
+    const t2=t.getTime()+75e3;
+    if(t2<=now.getTime()) rs.push({id:uid(),pid,ts:t2,sys:s1-2-((d+h)%3),dia:d1-1-((d*3+h)%2),pulse:p1-2,arm:'',pos:'',note:''});
   }}
-  return {profiles:[{id:pid,name:'Jeanne',rel:'Exemple',color:COLORS[0]}],readings:rs,current:pid,sample:true};
+  return {profiles:[{id:pid,name:'Jeanne',rel:'Exemple',color:COLORS[0]}],readings:rs,current:pid,sample:true,perSession:2};
 }
 function load(){
   try{const raw=localStorage.getItem(KEY); if(raw){S=JSON.parse(raw); if(S&&Array.isArray(S.profiles)) return;}}
@@ -205,6 +211,18 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(S));storageOK=true}c
 
 const prof=()=>S.profiles.find(p=>p.id===S.current)||S.profiles[0];
 const readingsOf=pid=>S.readings.filter(r=>r.pid===pid).sort((a,b)=>a.ts-b.ts);
+const GAP=10*6e4; // mesures à moins de 10 minutes d'écart = même séance
+function sessionsOf(pid){
+  const out=[];
+  readingsOf(pid).forEach(r=>{const g=out[out.length-1]; if(g&&r.ts-g.items[g.items.length-1].ts<=GAP) g.items.push(r); else out.push({items:[r]});});
+  out.forEach(g=>{const it=g.items, pu=it.filter(r=>r.pulse).map(r=>r.pulse);
+    g.ts=it[0].ts; g.sys=rnd(avg(it.map(r=>r.sys))); g.dia=rnd(avg(it.map(r=>r.dia))); g.pulse=pu.length?rnd(avg(pu)):null; g.n=it.length;
+    g.note=it.map(r=>r.note).filter(Boolean).join(' · ');});
+  return out;
+}
+const sessionWith=(pid,id)=>sessionsOf(pid).find(g=>g.items.some(r=>r.id===id));
+const perSess=()=>[1,2,3].includes(S.perSession)?S.perSession:2;
+const detail=g=>g.items.map(r=>`${r.sys}/${r.dia}`).join(' et ');
 
 function cat(s,d){
   if(s>=180||d>=120) return {k:'crit',t:'Très élevée : à revérifier'};
@@ -268,14 +286,17 @@ function chart(rs,days){
 }
 
 /* ---------- Vues ---------- */
+function critBanner(){
+  return critShow?`<div class="banner c-crit" role="alert"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">${I.alert}<strong>Lecture très élevée (180/120 ou plus)</strong></div>
+    <p class="small">Reposez-vous 5 minutes, assis, puis reprenez la mesure. Si elle reste aussi élevée, contactez un professionnel de la santé (Info-Santé 811 au Québec). <b>Appelez le 911</b> en cas de douleur à la poitrine, essoufflement, faiblesse, troubles de la vue ou de la parole.</p>
+    <button class="btn sm danger" data-act="critOk">J'ai compris</button></div>`:'';
+}
 function vHome(){
-  const p=prof(); const rs=readingsOf(p.id); const last=rs[rs.length-1];
+  const p=prof(); const rs=sessionsOf(p.id); const last=rs[rs.length-1];
   let h='';
   if(!storageOK) h+=`<div class="banner c-high"><strong>Stockage indisponible</strong><p class="small">Ce navigateur ne garde pas les données (navigation privée ?). Les mesures seront perdues à la fermeture.</p></div>`;
   if(S.sample) h+=`<div class="banner c-low"><strong>Données d'exemple</strong><p class="small">Ces mesures servent à montrer l'app. Effacez-les pour commencer avec les vôtres.</p><button class="btn sm outline" data-act="removeSample">Effacer l'exemple et commencer</button></div>`;
-  if(critShow) h+=`<div class="banner c-crit" role="alert"><div class="row" style="flex-wrap:nowrap;align-items:flex-start">${I.alert}<strong>Lecture très élevée (180/120 ou plus)</strong></div>
-    <p class="small">Reposez-vous 5 minutes, assis, puis reprenez la mesure. Si elle reste aussi élevée, contactez un professionnel de la santé (Info-Santé 811 au Québec). <b>Appelez le 911</b> en cas de douleur à la poitrine, essoufflement, faiblesse, troubles de la vue ou de la parole.</p>
-    <button class="btn sm danger" data-act="critOk">J'ai compris</button></div>`;
+  h+=critBanner();
   if(!last){
     h+=`<div class="card stack"><h2>Aucune mesure pour ${esc(p.name)}</h2><p class="muted">Prenez votre tension, puis touchez « Nouvelle mesure » pour noter les chiffres.</p></div>`;
   }else{
@@ -284,14 +305,15 @@ function vHome(){
     const a=rs.filter(r=>r.ts>now-w), b=rs.filter(r=>r.ts<=now-w&&r.ts>now-2*w);
     let sum='';
     if(a.length){
-      sum=`Moyenne des 7 derniers jours : <strong class="num">${rnd(avg(a.map(r=>r.sys)))}/${rnd(avg(a.map(r=>r.dia)))}</strong> (${a.length} mesure${a.length>1?'s':''})`;
+      sum=`Moyenne des 7 derniers jours : <strong class="num">${rnd(avg(a.map(r=>r.sys)))}/${rnd(avg(a.map(r=>r.dia)))}</strong> (${a.length} séance${a.length>1?'s':''})`;
       if(b.length){const df=rnd(avg(a.map(r=>r.sys))-avg(b.map(r=>r.sys)));
         sum+= df<=-2?`, soit ${-df} points de moins que la semaine précédente.`: df>=2?`, soit ${df} points de plus que la semaine précédente.`:', stable par rapport à la semaine précédente.';
       } else sum+='.';
     }
     h+=`<div class="card stack">
-      <span class="muted small">Dernière mesure · ${rel(last.ts)} à ${fTime(last.ts)}</span>
+      <span class="muted small">${last.n>1?'Dernière séance':'Dernière mesure'} · ${rel(last.ts)} à ${fTime(last.ts)}</span>
       <div class="row" style="align-items:baseline;gap:14px"><span class="big">${last.sys}<span class="sl">/</span>${last.dia}</span>${last.pulse?`<span class="muted">pouls ${last.pulse}</span>`:''}</div>
+      ${last.n>1?`<span class="muted small num">Moyenne de ${last.n} mesures : ${detail(last)}</span>`:''}
       <span class="chip c-${c.k}">${c.t}</span>
       ${sum?`<p style="border-top:1px solid var(--line);padding-top:12px">${sum}</p>`:''}
     </div>`;
@@ -314,8 +336,9 @@ function vEntry(){
   const p=prof(); const d=entryDraft||{};
   const opt=(name,vals)=>vals.map(([v,t])=>`<input type="radio" name="${name}" id="${name}-${v}" value="${v}"${d[name]===v?' checked':''}><label for="${name}-${v}">${t}</label>`).join('');
   return `<div class="top">${backBtn()}<span class="row" style="gap:8px">${av(p,'s')}<b>${esc(p.name)}</b></span></div>
-  <h1>Nouvelle mesure</h1>
-  <div class="dt"><label for="dt" class="muted">Date et heure</label><input type="datetime-local" id="dt" value="${d.dt||localDT(Date.now())}"></div>
+  ${(()=>{const N=perSess(), k=sess&&sess.pid===p.id?sess.count+1:1;
+    return N>1?`<div class="stack" style="gap:2px"><h1>Mesure ${k} sur ${N}</h1>${k>1?`<p class="muted small">Elle sera ajoutée à la séance commencée à ${fTime(sess.startTs)}.</p>`:''}</div>`:'<h1>Nouvelle mesure</h1>';})()}
+  ${sess&&sess.pid===p.id?'':`<div class="dt"><label for="dt" class="muted">Date et heure</label><input type="datetime-local" id="dt" value="${d.dt||localDT(Date.now())}"></div>`}
   <form id="ef" class="stack" novalidate>
     <div class="field"><label for="sys">Systolique<span>le chiffre du haut</span></label><div class="val"><input id="sys" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" value="${d.sys||''}" aria-describedby="hint"><span class="u">mmHg</span></div></div>
     <div class="field"><label for="dia">Diastolique<span>le chiffre du bas</span></label><div class="val"><input id="dia" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" value="${d.dia||''}"><span class="u">mmHg</span></div></div>
@@ -333,37 +356,65 @@ function vEntry(){
   </form>`;
 }
 
+function vBetween(){
+  const p=prof(); const N=perSess(), k=sess.count;
+  const r=S.readings.find(x=>x.id===sess.lastId)||{};
+  return `<div class="top"><span></span><span class="row" style="gap:8px">${av(p,'s')}<b>${esc(p.name)}</b></span></div>
+  ${critBanner()}
+  <div class="card stack" style="align-items:center;text-align:center;gap:12px">
+    <span class="chip c-ok" style="align-self:center">Mesure ${k} sur ${N} enregistrée</span>
+    <span class="big">${r.sys}<span class="sl">/</span>${r.dia}</span>
+    <h2>Reposez-vous une minute, puis prenez la mesure ${k+1}.</h2>
+    <div class="timer" id="timer" aria-live="polite">1:00</div>
+    <p class="muted small">Restez assis, le dos appuyé, les pieds au sol et le bras à la hauteur du cœur.</p>
+  </div>
+  <button class="btn primary" data-act="next">${I.plus}Entrer la mesure ${k+1}</button>
+  <button class="btn" data-act="endSess">Terminer avec ${k} mesure${k>1?'s':''}</button>`;
+}
+function startTimer(){
+  clearInterval(tm);
+  const tick=()=>{const el=$('#timer'); if(!el||view!=='between'||!sess){clearInterval(tm);return}
+    const left=Math.ceil((sess.restUntil-Date.now())/1000);
+    if(left<=0){el.textContent="C'est le moment";el.classList.add('done');clearInterval(tm);return}
+    el.textContent=`${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`;};
+  tick(); tm=setInterval(tick,500);
+}
+
 function vHistory(){
-  const p=prof(); const rs=readingsOf(p.id).reverse();
+  const p=prof(); const ss=sessionsOf(p.id).reverse();
   let h=`<div class="top">${backBtn()}<span class="row" style="gap:8px">${av(p,'s')}<b>${esc(p.name)}</b></span></div><h1>Historique</h1>`;
-  if(!rs.length) return h+`<p class="empty">Aucune mesure pour l'instant.</p>`;
+  if(!ss.length) return h+`<p class="empty">Aucune mesure pour l'instant.</p>`;
   let cur='';
-  rs.forEach(r=>{
-    const dk=fDay(r.ts); if(dk!==cur){cur=dk; h+=`<div class="day">${dk}</div>`}
-    const c=cat(r.sys,r.dia);
-    const det=[r.arm==='g'?'bras gauche':r.arm==='d'?'bras droit':'',r.pos,r.note].filter(Boolean).map(esc).join(' · ');
-    h+=`<div class="hrow"><span class="v">${r.sys}/${r.dia}</span><div class="meta"><span class="small">${fTime(r.ts)}${r.pulse?` · pouls ${r.pulse}`:''}</span><span class="chip c-${c.k}" style="font-size:14px;padding:2px 10px">${c.k==='ok'?'Dans la cible':c.t}</span>${det?`<span class="muted small">${det}</span>`:''}</div>
-      ${pending==='del:'+r.id?`<div class="confirm"><button class="btn sm danger solid" data-act="delYes" data-id="${r.id}">Supprimer cette mesure</button><button class="btn sm" data-act="cancel">Annuler</button></div>`:`<button class="del" data-act="del" data-id="${r.id}" aria-label="Supprimer la mesure ${r.sys}/${r.dia} de ${fTime(r.ts)}">${I.trash}</button>`}</div>`;
+  ss.forEach(g=>{
+    const dk=fDay(g.ts); if(dk!==cur){cur=dk; h+=`<div class="day">${dk}</div>`}
+    const c=cat(g.sys,g.dia);
+    h+=`<div class="hrow"><span class="v">${g.sys}/${g.dia}</span><div class="meta"><span class="small">${fTime(g.ts)}${g.pulse?` · pouls ${g.pulse}`:''}${g.n>1?` · moyenne de ${g.n}`:''}</span><span class="chip c-${c.k}" style="font-size:14px;padding:2px 10px">${c.k==='ok'?'Dans la cible':c.t}</span></div>
+      <div class="sub">${g.items.map(r=>{
+        const det=[r.arm==='g'?'bras gauche':r.arm==='d'?'bras droit':'',r.pos,r.note].filter(Boolean).map(esc).join(' · ');
+        return `<div class="srow"><span class="num muted">${fTime(r.ts)}</span><span class="num"><b>${r.sys}/${r.dia}</b>${r.pulse?` · pouls ${r.pulse}`:''}</span>
+          ${pending==='del:'+r.id?`<div class="confirm"><button class="btn sm danger solid" data-act="delYes" data-id="${r.id}">Supprimer cette mesure</button><button class="btn sm" data-act="cancel">Annuler</button></div>`:`<button class="del" data-act="del" data-id="${r.id}" aria-label="Supprimer la mesure ${r.sys}/${r.dia} de ${fTime(r.ts)}">${I.trash}</button>`}
+          ${det?`<span class="muted small" style="flex-basis:100%">${det}</span>`:''}</div>`}).join('')}</div></div>`;
   });
   return h;
 }
 
 function reportData(){
   const p=prof(); const since=Date.now()-repRange*DAY;
-  const rs=readingsOf(p.id).filter(r=>r.ts>=since);
+  const rs=sessionsOf(p.id).filter(g=>g.ts>=since);
   if(!rs.length) return {p,rs};
   const s=rs.map(r=>r.sys), d=rs.map(r=>r.dia), pu=rs.filter(r=>r.pulse).map(r=>r.pulse);
   const am=rs.filter(r=>new Date(r.ts).getHours()<12), pm=rs.filter(r=>new Date(r.ts).getHours()>=12);
   const m=a=>a.length?`${rnd(avg(a.map(r=>r.sys)))}/${rnd(avg(a.map(r=>r.dia)))}`:'–';
-  return {p,rs,avgAll:m(rs),am:m(am),pm:m(pm),n:rs.length,pulse:pu.length?rnd(avg(pu)):null,
+  return {p,rs,avgAll:m(rs),am:m(am),pm:m(pm),n:rs.length,nm:rs.reduce((x,g)=>x+g.n,0),pulse:pu.length?rnd(avg(pu)):null,
     maxS:Math.max(...s),minS:Math.min(...s),maxD:Math.max(...d),minD:Math.min(...d),
     over:rs.filter(r=>r.sys>=135||r.dia>=85).length,from:rs[0].ts,to:rs[rs.length-1].ts};
 }
 function reportText(R){
-  let t=`Suivi de la tension artérielle : ${R.p.name}\nPériode : du ${fShort(R.from)} au ${fShort(R.to)} (${R.n} mesures)\n\n`;
+  let t=`Suivi de la tension artérielle : ${R.p.name}\nPériode : du ${fShort(R.from)} au ${fShort(R.to)} (${R.n} séances, ${R.nm} mesures)\n`;
+  t+=`Chaque séance = moyenne des mesures prises à quelques minutes d'intervalle.\n\n`;
   t+=`Moyenne : ${R.avgAll} mmHg${R.pulse?`, pouls moyen ${R.pulse}`:''}\nMatin : ${R.am} · Après-midi et soir : ${R.pm}\n`;
-  t+=`Systolique : de ${R.minS} à ${R.maxS} · Diastolique : de ${R.minD} à ${R.maxD}\nMesures à 135/85 ou plus : ${R.over} sur ${R.n}\n\nDétail :\n`;
-  R.rs.slice().reverse().forEach(r=>{t+=`${fShort(r.ts)} ${fTime(r.ts)}  ${r.sys}/${r.dia}${r.pulse?`  pouls ${r.pulse}`:''}${r.note?`  (${r.note})`:''}\n`});
+  t+=`Systolique : de ${R.minS} à ${R.maxS} · Diastolique : de ${R.minD} à ${R.maxD}\nSéances à 135/85 ou plus : ${R.over} sur ${R.n}\n\nDétail :\n`;
+  R.rs.slice().reverse().forEach(g=>{t+=`${fShort(g.ts)} ${fTime(g.ts)}  ${g.sys}/${g.dia}${g.pulse?`  pouls ${g.pulse}`:''}${g.n>1?`  (moyenne de ${detail(g)})`:''}${g.note?`  [${g.note}]`:''}\n`});
   return t;
 }
 function vReport(){
@@ -371,14 +422,14 @@ function vReport(){
   let h=`<div class="top">${backBtn()}<span class="row" style="gap:8px">${av(R.p,'s')}<b>${esc(R.p.name)}</b></span></div><h1>Résumé pour le médecin</h1>
   <div class="seg" role="group" aria-label="Période du résumé">${[7,30,90].map(d=>`<button data-act="rep" data-id="${d}" aria-pressed="${repRange===d}">${d} jours</button>`).join('')}</div>`;
   if(!R.rs.length) return h+`<p class="empty">Aucune mesure sur cette période.</p>`;
-  h+=`<div class="card stack"><span class="muted small">Du ${fShort(R.from)} au ${fShort(R.to)} · ${R.n} mesures</span>
+  h+=`<div class="card stack"><span class="muted small">Du ${fShort(R.from)} au ${fShort(R.to)} · ${R.n} séances (${R.nm} mesures)</span>
     <div class="kv"><div><span class="muted small">Moyenne</span><b>${R.avgAll}</b></div><div><span class="muted small">Pouls moyen</span><b>${R.pulse??'–'}</b></div>
     <div><span class="muted small">Matin</span><b>${R.am}</b></div><div><span class="muted small">Après-midi et soir</span><b>${R.pm}</b></div></div>
-    <p class="small">Systolique de ${R.minS} à ${R.maxS}, diastolique de ${R.minD} à ${R.maxD}. ${R.over} mesure${R.over>1?'s':''} sur ${R.n} à 135/85 ou plus.</p></div>
+    <p class="small">Systolique de ${R.minS} à ${R.maxS}, diastolique de ${R.minD} à ${R.maxD}. ${R.over} séance${R.over>1?'s':''} sur ${R.n} à 135/85 ou plus.</p></div>
   <button class="btn primary" data-act="copyReport">Copier le résumé</button>
   <p class="muted small">Collez-le ensuite dans un courriel, un message ou une note pour le montrer au médecin.</p>
-  <div class="card tw" style="padding:10px 14px"><table class="rep"><thead><tr><th>Date</th><th>Heure</th><th>Tension</th><th>Pouls</th></tr></thead><tbody>
-  ${R.rs.slice().reverse().map(r=>`<tr><td>${fShort(r.ts)}</td><td>${fTime(r.ts)}</td><td><b>${r.sys}/${r.dia}</b></td><td>${r.pulse||'–'}</td></tr>`).join('')}</tbody></table></div>
+  <div class="card tw" style="padding:10px 14px"><table class="rep"><thead><tr><th>Date</th><th>Heure</th><th>Moyenne</th><th>Pouls</th><th>Détail</th></tr></thead><tbody>
+  ${R.rs.slice().reverse().map(r=>`<tr><td>${fShort(r.ts)}</td><td>${fTime(r.ts)}</td><td><b>${r.sys}/${r.dia}</b></td><td>${r.pulse||'–'}</td><td class="muted">${r.n>1?detail(r):'1 mesure'}</td></tr>`).join('')}</tbody></table></div>
   <textarea id="repText" class="sr" readonly aria-label="Texte du résumé" style="min-height:120px" hidden>${esc(reportText(R))}</textarea>`;
   return h;
 }
@@ -400,6 +451,8 @@ function vProfiles(){
 
 function vBackup(){
   let h=`<div class="top">${backBtn()}</div><h1>Sauvegarde et réglages</h1>
+  <div class="card stack"><h2>Mesures par séance</h2><p class="small">L'app propose de prendre ce nombre de mesures à une minute d'intervalle, puis en fait la moyenne. Hypertension Canada recommande 2 mesures, matin et soir.</p>
+    <div class="seg" role="group" aria-label="Mesures par séance">${[1,2,3].map(n=>`<button data-act="per" data-id="${n}" aria-pressed="${perSess()===n}">${n}</button>`).join('')}</div></div>
   <div class="card stack"><h2>Où sont mes données ?</h2><p class="small">Les mesures restent uniquement dans ce navigateur, sur cet appareil. Rien n'est envoyé sur internet. Si vous changez de téléphone ou effacez les données du navigateur, elles disparaissent : faites une copie de sauvegarde de temps en temps.</p></div>
   <div class="card stack"><h2>Faire une copie</h2><p class="small">Copie toutes les personnes et mesures. Collez ensuite le texte dans un courriel à vous-même ou dans une note.</p>
     <button class="btn outline" data-act="copyBackup">Copier la sauvegarde</button></div>
@@ -421,9 +474,11 @@ function header(){
 
 function render(focus){
   if(!S.profiles.length) view='profiles';
-  const V={home:vHome,entry:vEntry,history:vHistory,report:vReport,profiles:vProfiles,backup:vBackup}[view]||vHome;
+  if(view==='between'&&!sess) view='home';
+  const V={home:vHome,entry:vEntry,between:vBetween,history:vHistory,report:vReport,profiles:vProfiles,backup:vBackup}[view]||vHome;
   $('#app').innerHTML=header()+V();
   if(view==='entry') bindEntry();
+  if(view==='between') startTimer();
   if(view==='profiles'&&addOpen){$('#pf').addEventListener('submit',createProfile); if(focus) $('#pname').focus()}
   if(focus===true && view==='entry') $('#sys').focus();
 }
@@ -461,16 +516,36 @@ function saveEntry(){
     w.innerHTML=`<div class="banner c-high" role="alert"><strong>Vérifiez ces valeurs</strong><p class="small">${issues.join(' ')}</p></div>`;
     $('#saveBtn').textContent='Enregistrer quand même';return;
   }
-  const dtv=$('#dt').value; let ts=dtv?new Date(dtv).getTime():Date.now(); if(isNaN(ts)) ts=Date.now();
+  const pid=prof().id, cont=sess&&sess.pid===pid;
+  const dtEl=$('#dt'); let ts=Date.now();
+  if(!cont&&dtEl&&dtEl.value){const t=new Date(dtEl.value).getTime(); if(!isNaN(t)) ts=t;}
   const arm=(document.querySelector('input[name=arm]:checked')||{}).value||'';
   const pos=(document.querySelector('input[name=pos]:checked')||{}).value||'';
   const note=$('#note').value.trim().slice(0,200);
-  S.readings.push({id:uid(),pid:prof().id,ts,sys:s,dia:d,pulse:pu,arm,pos,note});
+  const id=uid();
+  S.readings.push({id,pid,ts,sys:s,dia:d,pulse:pu,arm,pos,note});
   save();
-  critShow=(s>=180||d>=120);
-  entryWarned=false; entryDraft=null; view='home'; render();
-  window.scrollTo(0,0);
-  toast(`${I.check}Enregistré : ${s}/${d}${pu?`, pouls ${pu}`:''}${storageOK?'':' (non sauvegardé)'}`);
+  if(s>=180||d>=120) critShow=true;
+  entryWarned=false; entryDraft=null;
+  // Séance : la mesure suivante est attendue si l'heure est « maintenant » (pas une saisie rétroactive).
+  const live=Math.abs(Date.now()-ts)<GAP;
+  if(cont) sess.count++; else sess={pid,count:1,startTs:ts};
+  sess.lastId=id;
+  if(live&&sess.count<perSess()){
+    sess.restUntil=Date.now()+60e3;
+    view='between'; render(); window.scrollTo(0,0);
+    if(!storageOK) toast('Attention : mesure non sauvegardée');
+    return;
+  }
+  finishSession(id);
+}
+function finishSession(id){
+  const pid=sess?sess.pid:prof().id;
+  sess=null; view='home'; render(); window.scrollTo(0,0);
+  const g=sessionWith(pid,id);
+  const ns=storageOK?'':' (non sauvegardé)';
+  if(g&&g.n>1) toast(`${I.check}Séance enregistrée : moyenne ${g.sys}/${g.dia} (${g.n} mesures)${ns}`);
+  else if(g) toast(`${I.check}Enregistré : ${g.sys}/${g.dia}${g.pulse?`, pouls ${g.pulse}`:''}${ns}`);
 }
 
 /* ---------- Actions ---------- */
@@ -490,7 +565,14 @@ function createProfile(e){
   S.profiles.push(p); S.current=p.id; save(); addOpen=false; view='home'; render(); toast(I.check+`${esc(name)} ajouté`);
 }
 const A={
-  go:id=>{pending=null;if(view==='entry')entryWarned=false;view=id;render(true);window.scrollTo(0,0)},
+  go:id=>{
+    pending=null; entryWarned=false;
+    if(id!=='entry'&&sess){finishSession(sess.lastId); if(id==='home') return;}
+    view=id; render(true); window.scrollTo(0,0);
+  },
+  next:()=>{view='entry';render(true);window.scrollTo(0,0)},
+  endSess:()=>finishSession(sess&&sess.lastId),
+  per:id=>{S.perSession=+id;save();render()},
   pick:id=>{S.current=id;save();view='home';critShow=false;render();window.scrollTo(0,0)},
   range:id=>{range=+id;render()},
   rep:id=>{repRange=+id;render()},
@@ -507,17 +589,17 @@ const A={
     if(!S.profiles.length){addOpen=true;view='profiles'} render(true);
   },
   copyReport:()=>copy(reportText(reportData()),'Résumé copié',$('#repText')),
-  copyBackup:()=>copy(JSON.stringify({app:'suivi-tension',v:1,at:new Date().toISOString(),profiles:S.profiles,readings:S.readings}),'Sauvegarde copiée',null),
+  copyBackup:()=>copy(JSON.stringify({app:'suivi-tension',v:1,at:new Date().toISOString(),perSession:perSess(),profiles:S.profiles,readings:S.readings}),'Sauvegarde copiée',null),
   restore:()=>{
     const raw=$('#restoreTxt').value.trim();
     try{const o=JSON.parse(raw); if(!Array.isArray(o.profiles)||!Array.isArray(o.readings)) throw 0; window.__restore=o; pending='restore'; render(); $('#restoreTxt').value=raw;}
     catch(e){$('#rerr').textContent="Ce texte n'est pas une sauvegarde valide. Copiez-la à nouveau en entier."}
   },
-  restoreYes:()=>{const o=window.__restore; if(!o) return; S={profiles:o.profiles,readings:o.readings,current:(o.profiles[0]||{}).id,sample:false}; save(); pending=null; view='home'; render(); toast(I.check+'Sauvegarde restaurée')},
+  restoreYes:()=>{const o=window.__restore; if(!o) return; S={profiles:o.profiles,readings:o.readings,current:(o.profiles[0]||{}).id,sample:false,perSession:o.perSession||2}; save(); pending=null; view='home'; render(); toast(I.check+'Sauvegarde restaurée')},
   profDel:id=>{pending='prof:'+id;render()},
   profYes:id=>{S.profiles=S.profiles.filter(p=>p.id!==id);S.readings=S.readings.filter(r=>r.pid!==id);if(S.current===id)S.current=S.profiles[0]?S.profiles[0].id:null;if(!S.profiles.some(p=>p.rel==='Exemple'))S.sample=false;pending=null;save();render()},
   wipe:()=>{pending='wipe';render()},
-  wipeYes:()=>{S={profiles:[],readings:[],current:null,sample:false};pending=null;save();addOpen=true;view='profiles';render(true)}
+  wipeYes:()=>{S={profiles:[],readings:[],current:null,sample:false,perSession:perSess()};pending=null;save();addOpen=true;view='profiles';render(true)}
 };
 document.addEventListener('click',e=>{const b=e.target.closest('[data-act]'); if(!b) return; const f=A[b.dataset.act]; if(f){e.preventDefault(); f(b.dataset.id)}});
 
