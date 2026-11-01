@@ -1,5 +1,5 @@
 // Suivi Tension : mode hors ligne
-const CACHE = 'suivi-tension-v2';
+const CACHE = 'suivi-tension-v3';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

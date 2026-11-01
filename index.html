@@ -28,6 +28,7 @@ img{max-width:100%}
   --sys:#0F5F63; --dia:#4C6FBF; --pulse:#A4532A; --grid:#E4E8EC;
   --ok-bg:#E3F2EA; --ok-fg:#1E5B3A; --warn-bg:#FDF0DC; --warn-fg:#6E3C00;
   --crit-bg:#FBE3E1; --crit-fg:#8E1F17; --low-bg:#E6ECF8; --low-fg:#2B4384;
+  --z-green:#2F9E5B; --z-yellow:#E8B90E; --z-red:#CC3B2F;
   --font:'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --r:18px;
 }
@@ -37,6 +38,7 @@ img{max-width:100%}
   --sys:#5CC2C0; --dia:#8FAEF0; --pulse:#E3A27A; --grid:#26303A;
   --ok-bg:#183A29; --ok-fg:#9FDDB9; --warn-bg:#3D2A10; --warn-fg:#F4C98A;
   --crit-bg:#451A17; --crit-fg:#F6AFA8; --low-bg:#1E2A47; --low-fg:#AFC2F2;
+  --z-green:#46B874; --z-yellow:#F0C93A; --z-red:#E2574B;
   color-scheme:dark;
 }}
 :root[data-theme="dark"]{
@@ -45,6 +47,7 @@ img{max-width:100%}
   --sys:#5CC2C0; --dia:#8FAEF0; --pulse:#E3A27A; --grid:#26303A;
   --ok-bg:#183A29; --ok-fg:#9FDDB9; --warn-bg:#3D2A10; --warn-fg:#F4C98A;
   --crit-bg:#451A17; --crit-fg:#F6AFA8; --low-bg:#1E2A47; --low-fg:#AFC2F2;
+  --z-green:#46B874; --z-yellow:#F0C93A; --z-red:#E2574B;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -138,6 +141,24 @@ svg.ch .l{fill:none;stroke-width:3;stroke-linejoin:round;stroke-linecap:round}
 .hrow{background:var(--card);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .hrow .v{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
 .hrow .meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.z-green{background:var(--z-green)} .z-yellow{background:var(--z-yellow)} .z-red{background:var(--z-red)}
+.c-red{background:var(--crit-bg);color:var(--crit-fg)}
+.lastrow{display:flex;gap:12px;align-items:flex-start}
+.lastrow .big{font-size:50px}
+.thermo{flex-shrink:0;display:flex;gap:8px;align-items:flex-start;padding-top:4px}
+.th-scale{display:flex;flex-direction:column;align-items:center}
+.th-tube{position:relative;width:22px;height:150px;border-radius:11px 11px 0 0;display:flex;flex-direction:column;box-shadow:inset 0 0 0 2px var(--line)}
+.th-seg:first-child{border-radius:11px 11px 0 0}
+.th-seg.z-red{flex:25}.th-seg.z-yellow{flex:25}.th-seg.z-green{flex:50}
+.th-mark{position:absolute;left:-7px;right:-7px;height:6px;border-radius:3px;background:var(--fg);box-shadow:0 0 0 2px var(--card);transform:translateY(50%)}
+.th-mark::before{content:"";position:absolute;left:-10px;top:50%;transform:translateY(-50%);border:7px solid transparent;border-left:9px solid var(--fg);border-right:0}
+.th-bulb{width:36px;height:36px;border-radius:50%;margin-top:-4px;box-shadow:0 0 0 3px var(--card)}
+.th-labels{position:relative;width:78px;height:150px}
+.th-labels span{position:absolute;left:0;transform:translateY(50%);display:flex;flex-direction:column;font-size:12px;line-height:1.15;color:var(--muted)}
+.th-labels b{font-size:13px;color:var(--fg)}
+.zdot{display:inline-block;width:14px;height:14px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px var(--card)}
+.zbar{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px}
+@media (max-width:370px){.th-labels{width:64px}.lastrow .big{font-size:42px}}
 .hrow .sub{width:100%;display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--line);padding-top:4px}
 .srow{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;font-size:16px}
 .srow .del{margin-left:auto}
@@ -225,10 +246,33 @@ const perSess=()=>[1,2,3].includes(S.perSession)?S.perSession:2;
 const detail=g=>g.items.map(r=>`${r.sys}/${r.dia}`).join(' et ');
 
 function cat(s,d){
-  if(s>=180||d>=120) return {k:'crit',t:'Très élevée : à revérifier'};
-  if(s>=135||d>=85) return {k:'high',t:'Au-dessus de la cible'};
-  if(s<90||d<60) return {k:'low',t:'Basse'};
-  return {k:'ok',t:'Dans la cible (moins de 135/85)'};
+  if(s>=180||d>=120) return {k:'crit',z:'red',t:'Très élevée : à revérifier'};
+  if(s>=160||d>=100) return {k:'red',z:'red',t:'Élevée'};
+  if(s>=135||d>=85) return {k:'high',z:'yellow',t:'Au-dessus de la cible'};
+  if(s<90||d<60) return {k:'low',z:'green',t:'Basse'};
+  return {k:'ok',z:'green',t:'Dans la cible (moins de 135/85)'};
+}
+/* Thermomètre : vert 0–50 %, jaune 50–75 %, rouge 75–100 %. La valeur la plus défavorable (haut ou bas) décide. */
+function lerp(v,pts){
+  if(v<=pts[0][0]) return pts[0][1];
+  for(let i=1;i<pts.length;i++) if(v<=pts[i][0]) return pts[i-1][1]+(v-pts[i-1][0])/(pts[i][0]-pts[i-1][0])*(pts[i][1]-pts[i-1][1]);
+  return pts[pts.length-1][1];
+}
+const gaugePos=(s,d)=>Math.max(3,Math.min(97,Math.max(lerp(s,[[90,0],[135,50],[160,75],[200,100]]),lerp(d,[[60,0],[85,50],[100,75],[130,100]]))));
+const ZNAME={green:'vert',yellow:'jaune',red:'rouge'};
+function thermo(s,d){
+  const c=cat(s,d), pos=gaugePos(s,d).toFixed(1);
+  return `<div class="thermo" role="img" aria-label="Indicateur ${ZNAME[c.z]} : ${c.t}">
+    <div class="th-scale">
+      <div class="th-tube"><div class="th-seg z-red"></div><div class="th-seg z-yellow"></div><div class="th-seg z-green"></div><div class="th-mark" style="bottom:${pos}%"></div></div>
+      <div class="th-bulb z-${c.z}"></div>
+    </div>
+    <div class="th-labels" aria-hidden="true">
+      <span style="bottom:87.5%"><b>Élevée</b>160/100+</span>
+      <span style="bottom:62.5%"><b>Au-dessus</b>135/85</span>
+      <span style="bottom:25%"><b>Cible</b>sous 135/85</span>
+    </div>
+  </div>`;
 }
 const fDay=ts=>new Date(ts).toLocaleDateString('fr-CA',{weekday:'long',day:'numeric',month:'long'});
 const fShort=ts=>new Date(ts).toLocaleDateString('fr-CA',{day:'numeric',month:'short'});
@@ -312,9 +356,15 @@ function vHome(){
     }
     h+=`<div class="card stack">
       <span class="muted small">${last.n>1?'Dernière séance':'Dernière mesure'} · ${rel(last.ts)} à ${fTime(last.ts)}</span>
-      <div class="row" style="align-items:baseline;gap:14px"><span class="big">${last.sys}<span class="sl">/</span>${last.dia}</span>${last.pulse?`<span class="muted">pouls ${last.pulse}</span>`:''}</div>
-      ${last.n>1?`<span class="muted small num">Moyenne de ${last.n} mesures : ${detail(last)}</span>`:''}
-      <span class="chip c-${c.k}">${c.t}</span>
+      <div class="lastrow">
+        <div class="stack" style="min-width:0;flex:1">
+          <span class="big">${last.sys}<span class="sl">/</span>${last.dia}</span>
+          ${last.pulse?`<span class="muted">pouls ${last.pulse}</span>`:''}
+          ${last.n>1?`<span class="muted small num">Moyenne de ${last.n} mesures : ${detail(last)}</span>`:''}
+          <span class="chip c-${c.k}">${c.t}</span>
+        </div>
+        ${thermo(last.sys,last.dia)}
+      </div>
       ${sum?`<p style="border-top:1px solid var(--line);padding-top:12px">${sum}</p>`:''}
     </div>`;
     h+=`<div class="seg" role="group" aria-label="Période du graphique">${[7,14,30,90].map(d=>`<button data-act="range" data-id="${d}" aria-pressed="${range===d}">${d} j</button>`).join('')}</div>
@@ -388,7 +438,7 @@ function vHistory(){
   ss.forEach(g=>{
     const dk=fDay(g.ts); if(dk!==cur){cur=dk; h+=`<div class="day">${dk}</div>`}
     const c=cat(g.sys,g.dia);
-    h+=`<div class="hrow"><span class="v">${g.sys}/${g.dia}</span><div class="meta"><span class="small">${fTime(g.ts)}${g.pulse?` · pouls ${g.pulse}`:''}${g.n>1?` · moyenne de ${g.n}`:''}</span><span class="chip c-${c.k}" style="font-size:14px;padding:2px 10px">${c.k==='ok'?'Dans la cible':c.t}</span></div>
+    h+=`<div class="hrow"><span class="zdot z-${c.z}" title="Zone ${ZNAME[c.z]}"></span><span class="v">${g.sys}/${g.dia}</span><div class="meta"><span class="small">${fTime(g.ts)}${g.pulse?` · pouls ${g.pulse}`:''}${g.n>1?` · moyenne de ${g.n}`:''}</span><span class="chip c-${c.k}" style="font-size:14px;padding:2px 10px">${c.k==='ok'?'Dans la cible':c.t}</span></div>
       <div class="sub">${g.items.map(r=>{
         const det=[r.arm==='g'?'bras gauche':r.arm==='d'?'bras droit':'',r.pos,r.note].filter(Boolean).map(esc).join(' · ');
         return `<div class="srow"><span class="num muted">${fTime(r.ts)}</span><span class="num"><b>${r.sys}/${r.dia}</b>${r.pulse?` · pouls ${r.pulse}`:''}</span>
@@ -405,7 +455,8 @@ function reportData(){
   const s=rs.map(r=>r.sys), d=rs.map(r=>r.dia), pu=rs.filter(r=>r.pulse).map(r=>r.pulse);
   const am=rs.filter(r=>new Date(r.ts).getHours()<12), pm=rs.filter(r=>new Date(r.ts).getHours()>=12);
   const m=a=>a.length?`${rnd(avg(a.map(r=>r.sys)))}/${rnd(avg(a.map(r=>r.dia)))}`:'–';
-  return {p,rs,avgAll:m(rs),am:m(am),pm:m(pm),n:rs.length,nm:rs.reduce((x,g)=>x+g.n,0),pulse:pu.length?rnd(avg(pu)):null,
+  const zc={green:0,yellow:0,red:0}; rs.forEach(g=>zc[cat(g.sys,g.dia).z]++);
+  return {p,rs,zc,avgAll:m(rs),am:m(am),pm:m(pm),n:rs.length,nm:rs.reduce((x,g)=>x+g.n,0),pulse:pu.length?rnd(avg(pu)):null,
     maxS:Math.max(...s),minS:Math.min(...s),maxD:Math.max(...d),minD:Math.min(...d),
     over:rs.filter(r=>r.sys>=135||r.dia>=85).length,from:rs[0].ts,to:rs[rs.length-1].ts};
 }
@@ -413,7 +464,7 @@ function reportText(R){
   let t=`Suivi de la tension artérielle : ${R.p.name}\nPériode : du ${fShort(R.from)} au ${fShort(R.to)} (${R.n} séances, ${R.nm} mesures)\n`;
   t+=`Chaque séance = moyenne des mesures prises à quelques minutes d'intervalle.\n\n`;
   t+=`Moyenne : ${R.avgAll} mmHg${R.pulse?`, pouls moyen ${R.pulse}`:''}\nMatin : ${R.am} · Après-midi et soir : ${R.pm}\n`;
-  t+=`Systolique : de ${R.minS} à ${R.maxS} · Diastolique : de ${R.minD} à ${R.maxD}\nSéances à 135/85 ou plus : ${R.over} sur ${R.n}\n\nDétail :\n`;
+  t+=`Systolique : de ${R.minS} à ${R.maxS} · Diastolique : de ${R.minD} à ${R.maxD}\nSéances à 135/85 ou plus : ${R.over} sur ${R.n}\nRépartition : ${R.zc.green} dans la cible (vert), ${R.zc.yellow} au-dessus de la cible (jaune), ${R.zc.red} élevées, 160/100 ou plus (rouge)\n\nDétail :\n`;
   R.rs.slice().reverse().forEach(g=>{t+=`${fShort(g.ts)} ${fTime(g.ts)}  ${g.sys}/${g.dia}${g.pulse?`  pouls ${g.pulse}`:''}${g.n>1?`  (moyenne de ${detail(g)})`:''}${g.note?`  [${g.note}]`:''}\n`});
   return t;
 }
@@ -425,7 +476,9 @@ function vReport(){
   h+=`<div class="card stack"><span class="muted small">Du ${fShort(R.from)} au ${fShort(R.to)} · ${R.n} séances (${R.nm} mesures)</span>
     <div class="kv"><div><span class="muted small">Moyenne</span><b>${R.avgAll}</b></div><div><span class="muted small">Pouls moyen</span><b>${R.pulse??'–'}</b></div>
     <div><span class="muted small">Matin</span><b>${R.am}</b></div><div><span class="muted small">Après-midi et soir</span><b>${R.pm}</b></div></div>
-    <p class="small">Systolique de ${R.minS} à ${R.maxS}, diastolique de ${R.minD} à ${R.maxD}. ${R.over} séance${R.over>1?'s':''} sur ${R.n} à 135/85 ou plus.</p></div>
+    <p class="small">Systolique de ${R.minS} à ${R.maxS}, diastolique de ${R.minD} à ${R.maxD}. ${R.over} séance${R.over>1?'s':''} sur ${R.n} à 135/85 ou plus.</p>
+    <div class="zbar" role="img" aria-label="Répartition : ${R.zc.green} vert, ${R.zc.yellow} jaune, ${R.zc.red} rouge">${['green','yellow','red'].filter(z=>R.zc[z]).map(z=>`<span class="z-${z}" style="flex:${R.zc[z]}"></span>`).join('')}</div>
+    <div class="legend"><span><span class="zdot z-green"></span>Cible ${R.zc.green}</span><span><span class="zdot z-yellow"></span>Au-dessus ${R.zc.yellow}</span><span><span class="zdot z-red"></span>Élevée ${R.zc.red}</span></div></div>
   <button class="btn primary" data-act="copyReport">Copier le résumé</button>
   <p class="muted small">Collez-le ensuite dans un courriel, un message ou une note pour le montrer au médecin.</p>
   <div class="card tw" style="padding:10px 14px"><table class="rep"><thead><tr><th>Date</th><th>Heure</th><th>Moyenne</th><th>Pouls</th><th>Détail</th></tr></thead><tbody>
